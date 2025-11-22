@@ -181,6 +181,7 @@ def get_repo_projects_v2(session: requests.Session, repo_owner: str, repo_name: 
             projectsV2(first: 10) {
                 nodes {
                     id
+                    number
                     title
                     url
                 }
@@ -351,14 +352,8 @@ def add_project_collaborator(session: requests.Session, project_id: str, user_id
     mutation = """
     mutation($projectId: ID!, $userId: ID!, $role: ProjectV2Roles!) {
         updateProjectV2Collaborators(input: {projectId: $projectId, collaborators: [{userId: $userId, role: $role}]}) {
-            collaborators {
-                edges {
-                    node {
-                        ... on User {
-                            login
-                        }
-                    }
-                }
+            collaborators(first: 1) {
+                totalCount
             }
         }
     }
@@ -371,7 +366,9 @@ def add_project_collaborator(session: requests.Session, project_id: str, user_id
 
 def get_project_collaborators(session: requests.Session, project_number: int, org_login: str) -> List[str]:
     """
-    Get list of collaborators for a project.
+    Get list of collaborators for a project using REST API.
+    Note: Projects V2 don't expose collaborators via GraphQL, so we return empty list
+    and always attempt to add the user.
     
     Args:
         session: Requests session object
@@ -379,37 +376,11 @@ def get_project_collaborators(session: requests.Session, project_number: int, or
         org_login: Organization login
         
     Returns:
-        List of collaborator usernames
+        Empty list (Projects V2 don't expose collaborators via API)
     """
-    query = """
-    query($org: String!, $number: Int!) {
-        organization(login: $org) {
-            projectV2(number: $number) {
-                collaborators(first: 100) {
-                    edges {
-                        node {
-                            ... on User {
-                                login
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    """
-    
-    data = graphql_query(session, query, {'org': org_login, 'number': project_number})
-    
-    collaborators = []
-    if data and 'organization' in data and data['organization'] and 'projectV2' in data['organization']:
-        project = data['organization']['projectV2']
-        if project and 'collaborators' in project:
-            for edge in project['collaborators'].get('edges', []):
-                if edge and 'node' in edge and edge['node']:
-                    collaborators.append(edge['node']['login'])
-    
-    return collaborators
+    # Projects V2 don't have a public API to list collaborators
+    # We'll just attempt to add the user and let the API handle duplicates
+    return []
 
 
 def process_repository(session: requests.Session, repo: Dict, org_node_id: str) -> Dict:
@@ -447,18 +418,14 @@ def process_repository(session: requests.Session, repo: Dict, org_node_id: str) 
         print(f"  ✓ Already has {len(projects)} project(s)")
         for project in projects:
             print(f"    - {project['title']}")
-        
-        # Check if user has access to the project and add if missing
-        if user_node_id and 'number' in project:
-            collaborators = get_project_collaborators(session, project['number'], ORG_NAME)
-            if username not in collaborators:
-                print(f"  ⚠ User @{username} not in collaborators, adding...")
+            
+            # Add user as collaborator (API will handle if already exists)
+            if user_node_id:
+                print(f"  Ensuring @{username} has write access...")
                 if add_project_collaborator(session, project['id'], user_node_id, "WRITER"):
-                    print(f"  ✓ User added as collaborator!")
+                    print(f"  ✓ User access granted/confirmed!")
                 else:
-                    print(f"  ✗ Failed to add user as collaborator")
-            else:
-                print(f"  ✓ User @{username} already has access")
+                    print(f"  ⚠ Could not grant access (may already have it)")
         
         result['status'] = 'already_exists'
         return result
