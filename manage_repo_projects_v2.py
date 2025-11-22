@@ -335,7 +335,7 @@ def get_repo_node_id(session: requests.Session, repo_owner: str, repo_name: str)
     return None
 
 
-def process_repository(session: requests.Session, repo: Dict, org_node_id: str) -> None:
+def process_repository(session: requests.Session, repo: Dict, org_node_id: str) -> Dict:
     """
     Process a single repository: check for projects and create if needed.
     
@@ -343,9 +343,13 @@ def process_repository(session: requests.Session, repo: Dict, org_node_id: str) 
         session: Requests session object
         repo: Repository dictionary
         org_node_id: Node ID of the organization
+        
+    Returns:
+        Dictionary with processing results
     """
     repo_name = repo['name']
     repo_owner = repo['owner']['login']
+    result = {'repo': repo_name, 'status': 'skipped', 'project_url': None, 'username': None}
     
     print(f"Processing: {repo_name}")
     
@@ -356,7 +360,8 @@ def process_repository(session: requests.Session, repo: Dict, org_node_id: str) 
         print(f"  ✓ Already has {len(projects)} project(s)")
         for project in projects:
             print(f"    - {project['title']}")
-        return
+        result['status'] = 'already_exists'
+        return result
     
     # No projects found, create one
     print(f"  ✗ No projects found")
@@ -389,6 +394,9 @@ def process_repository(session: requests.Session, repo: Dict, org_node_id: str) 
     if project:
         print(f"  ✓ Project created successfully!")
         print(f"    Project URL: {project['url']}")
+        result['status'] = 'created'
+        result['project_url'] = project['url']
+        result['username'] = username
         
         # Link project to repository
         repo_node_id = get_repo_node_id(session, repo_owner, repo_name)
@@ -399,12 +407,16 @@ def process_repository(session: requests.Session, repo: Dict, org_node_id: str) 
                 print(f"  ✓ Project linked to repository!")
             else:
                 print(f"  ✗ Failed to link project to repository")
+                result['status'] = 'created_not_linked'
         else:
             print(f"  Warning: Could not get repository node ID for linking")
+            result['status'] = 'created_not_linked'
     else:
         print(f"  ✗ Failed to create project")
+        result['status'] = 'failed'
     
     print()
+    return result
 
 
 def main():
@@ -451,8 +463,43 @@ def main():
     print("=" * 70)
     print()
     
+    results = []
     for repo in repos:
-        process_repository(session, repo, org_node_id)
+        result = process_repository(session, repo, org_node_id)
+        results.append(result)
+    
+    # Print summary
+    print("=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    print()
+    
+    created = [r for r in results if r['status'] == 'created']
+    already_exists = [r for r in results if r['status'] == 'already_exists']
+    failed = [r for r in results if r['status'] == 'failed']
+    created_not_linked = [r for r in results if r['status'] == 'created_not_linked']
+    
+    print(f"Total repositories processed: {len(results)}")
+    print(f"  ✓ Projects created: {len(created)}")
+    print(f"  ✓ Already had projects: {len(already_exists)}")
+    if failed:
+        print(f"  ✗ Failed to create: {len(failed)}")
+    if created_not_linked:
+        print(f"  ⚠ Created but not linked: {len(created_not_linked)}")
+    print()
+    
+    if created:
+        print("Projects Created:")
+        for r in created:
+            print(f"  • {r['repo']} → @{r['username']} final project")
+            print(f"    {r['project_url']}")
+        print()
+    
+    if failed:
+        print("Failed:")
+        for r in failed:
+            print(f"  • {r['repo']}")
+        print()
     
     print("=" * 70)
     print("Processing Complete!")
