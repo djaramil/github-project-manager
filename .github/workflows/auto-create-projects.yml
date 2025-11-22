@@ -1,0 +1,49 @@
+name: Auto-Create Repository Projects
+
+on:
+  # Run every 15 minutes
+  schedule:
+    - cron: '*/15 * * * *'
+  
+  # Allow manual trigger
+  workflow_dispatch:
+  
+  # Run on push to main (for testing)
+  push:
+    branches:
+      - main
+
+jobs:
+  create-projects:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      - name: Run project creation script
+        env:
+          GITHUB_TOKEN: ${{ secrets.PROJECT_MANAGER_TOKEN }}
+          ORG_NAME: FAU-Fall2025-iOS-Mobile-App
+          REPO_FILTER: final-project
+        run: |
+          python manage_repo_projects_v2.py
+      
+      - name: Upload logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs
+          path: |
+            *.log
+          retention-days: 7
